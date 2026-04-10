@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --bg: #020617;
+  --ink: #f1f5f9;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.gold-gradient-text {
+  background: linear-gradient(to right, #fde68a, #fbbf24, #d97706);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.amber-glow:focus {
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #fbbf24;
+}
+
+/* High-Precision Label Printing Logic: 50mm x 30mm */
+@media print {
+    body {
+        background: white !important;
+        color: black !important;
+        margin: 0;
+        padding: 0;
+    }
+    #root, header, aside, .no-print {
+        display: none !important;
+    }
+    #barcode-print-area {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 50mm !important;
+        height: 30mm !important;
+        background: white !important;
+        padding: 2mm !important;
+        margin: 0 !important;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        visibility: visible !important;
+    }
+    #barcode-print-area * {
+        visibility: visible !important;
+        color: black !important;
+    }
+    @page {
+        size: 50mm 30mm;
+        margin: 0;
+    }
+}

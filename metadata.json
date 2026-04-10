@@ -1,0 +1,7 @@
+{
+  "name": "BDT",
+  "description": "A professional-grade inventory management system featuring multi-store support, barcode scanning, and role-based access control.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
