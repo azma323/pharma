@@ -24,7 +24,6 @@ interface SalesProps {
   canDelete: boolean;
 }
 
-// 🔴 Local Cart Item Interface for Pharmacy
 interface CartItem {
   cartId: string;
   product: Product;
@@ -49,7 +48,6 @@ const Sales: React.FC<SalesProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 20; 
 
-  // 🔴 Scanner & Big Search States
   const [isScanning, setIsScanning] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const scannerRef = useRef<any>(null);
@@ -58,9 +56,13 @@ const Sales: React.FC<SalesProps> = ({
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
 
-  // 🔴 Pharmacy Cart & Checkout States
+  // 🔴 Cart & Checkout States
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerId, setCustomerId] = useState('');
+  // 🔴 New States for Customer Smart Search
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+
   const [prescriptionRef, setPrescriptionRef] = useState('');
   const [discount, setDiscount] = useState(0);
   const [amountPaid, setAmountPaid] = useState<string>(''); 
@@ -85,7 +87,7 @@ const Sales: React.FC<SalesProps> = ({
 
   useEffect(() => setCurrentPage(1), [searchTerm, filterDate]);
 
-  // 🔴 BIG SEARCH DROPDOWN LOGIC (Name, SKU or Generic Name)
+  // Product Search Logic
   useEffect(() => {
     if (productSearchTerm.trim() === '') {
       setProductSearchResults([]);
@@ -102,6 +104,18 @@ const Sales: React.FC<SalesProps> = ({
     );
     setProductSearchResults(results);
   }, [productSearchTerm, products, currentStore.id]);
+
+  // 🔴 Customer Phone/Name Search Logic
+  const filteredCustomers = useMemo(() => {
+    const lowerTerm = customerSearchTerm.toLowerCase();
+    return customers.filter(c => 
+      c.storeId === currentStore.id && 
+      (
+        c.name.toLowerCase().includes(lowerTerm) || 
+        (c.phone && c.phone.includes(lowerTerm))
+      )
+    );
+  }, [customers, currentStore.id, customerSearchTerm]);
 
   const safeStopScanner = async () => {
     if (scannerRef.current) {
@@ -142,7 +156,6 @@ const Sales: React.FC<SalesProps> = ({
     }, 350);
   };
 
-  // 🔴 ADD TO CART LOGIC
   const processAddToCart = (product: Product) => {
     if (product.quantity <= 0) {
         alert(`Out of Stock: ${product.name}`);
@@ -181,7 +194,6 @@ const Sales: React.FC<SalesProps> = ({
     }
   };
 
-  // 🔴 Cart Manipulation Handlers
   const handleCartQtyChange = (cartId: string, qty: number) => {
     if (qty < 1 || isNaN(qty)) return;
     setCart(cart.map(c => c.cartId === cartId ? { ...c, quantity: qty } : c));
@@ -208,14 +220,12 @@ const Sales: React.FC<SalesProps> = ({
     setCart(cart.filter(c => c.cartId !== cartId));
   };
 
-  // 🔴 Checkout Calculations
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
   const cartTotalAfterDiscount = cartSubtotal * (1 - (discount / 100));
   const isWalkIn = !customerId;
   const finalAmountPaid = isWalkIn ? cartTotalAfterDiscount : (parseFloat(amountPaid) || 0);
   const cartDue = Math.max(0, cartTotalAfterDiscount - finalAmountPaid);
 
-  // 🔴 Final Checkout Processing
   const handleConfirmSale = () => {
     if (cart.length === 0) return alert('Cart is empty. Please add items to sell.');
     if (finalAmountPaid < cartTotalAfterDiscount && isWalkIn) {
@@ -225,7 +235,6 @@ const Sales: React.FC<SalesProps> = ({
        return alert('Amount paid cannot exceed the total cart value.');
     }
 
-    // Validate Stock for Pharmacy Units
     for (const item of cart) {
         let multiplier = 1;
         if (item.saleUnit === 'BOX' && (item.product as any).piecesPerBox) multiplier = (item.product as any).piecesPerBox;
@@ -258,16 +267,16 @@ const Sales: React.FC<SalesProps> = ({
           customerName: isWalkIn ? 'Cash Sale (Walk-in)' : (customers.find(c => c.id === customerId)?.name || 'Walk-in Patient'),
           productId: item.product.id,
           productName: displayProductName,
-          quantity: baseQtyToDeduct, // Deduct base units
+          quantity: baseQtyToDeduct, 
           buyingPrice: item.product.buyingPrice,
-          unitPrice: itemTotal / baseQtyToDeduct, // Normalize price per base unit
+          unitPrice: itemTotal / baseQtyToDeduct, 
           discount: discount,
           totalPrice: itemTotal,
           amountPaid: itemPaid,
           amountDue: itemDue,
           paymentMethod: paymentMethod, 
           storeId: currentStore.id,
-          prescriptionRef: prescriptionRef || undefined // Save Prescription
+          prescriptionRef: prescriptionRef || undefined 
        } as any);
 
        onUpdateStock(item.product.id, { quantity: item.product.quantity - baseQtyToDeduct });
@@ -280,9 +289,10 @@ const Sales: React.FC<SalesProps> = ({
     setShowSuccessToast(true); 
     setTimeout(() => setShowSuccessToast(false), 2000); 
     
-    // Clear Local State
+    // 🔴 Reset everything including customer search
     setCart([]);
     setCustomerId('');
+    setCustomerSearchTerm('');
     setPrescriptionRef('');
     setDiscount(0);
     setAmountPaid('');
@@ -290,7 +300,6 @@ const Sales: React.FC<SalesProps> = ({
     setInvoiceId(`INV-${new Date().getFullYear()}-${String(sales.length + cart.length + 1).padStart(3, '0')}`);
   };
 
-  // ====== Historic Handlers (Return, Print, Export) ======
   const getReturnableQty = (sale: Sale) => {
     if (!sale) return 0;
     const returns = sales.filter(s => s.invoiceId === `RET-${sale.invoiceId}` && s.productId === sale.productId);
@@ -734,7 +743,6 @@ const Sales: React.FC<SalesProps> = ({
         <div className="space-y-6">
           <div className="space-y-2">
             
-            {/* 🔴 NEW BIG SEARCH DROPDOWN UI */}
             <div className="relative z-[100] group">
               <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
                  <Keyboard className="w-5 h-5 text-slate-500 group-focus-within:text-amber-400 transition-colors" />
@@ -850,7 +858,6 @@ const Sales: React.FC<SalesProps> = ({
                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter italic">Base Stock: {cartItem.product.quantity}</p>
                       </td>
                       <td className="px-4 py-4 text-center">
-                         {/* 🔴 Unit Selector for Pharmacy */}
                          <select 
                            value={cartItem.saleUnit} 
                            onChange={(e) => handleCartUnitChange(cartItem.cartId, e.target.value as any)}
@@ -886,7 +893,6 @@ const Sales: React.FC<SalesProps> = ({
                       <td className="px-4 py-4 text-right font-black text-white">
                          ${(cartItem.quantity * cartItem.unitPrice).toFixed(2)}
                       </td>
-                      {/* 🔴 Local Delete Action Button */}
                       <td className="px-6 py-4 text-center">
                          <button 
                            type="button"
@@ -911,24 +917,70 @@ const Sales: React.FC<SalesProps> = ({
            </table>
         </div>
         
-        {/* 🔴 CHECKOUT PANEL */}
+        {/* 🔴 CHECKOUT PANEL WITH SMART CUSTOMER SEARCH 🔴 */}
         <div className="p-6 bg-slate-950 border-t border-slate-800 grid grid-cols-1 md:grid-cols-12 gap-6">
-           {/* Left Settings */}
            <div className="md:col-span-8 space-y-4">
               <div className="flex gap-4">
-                 <div className="flex-1">
+                 
+                 {/* 🔴 SMART CUSTOMER SEARCH FIELD 🔴 */}
+                 <div className="flex-1 relative">
                    <label className="text-[10px] text-slate-500 uppercase tracking-widest block mb-1">Patient Profile</label>
-                   <select 
-                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-amber-400"
-                     value={customerId} 
-                     onChange={e => setCustomerId(e.target.value)}
-                   >
-                     <option value="">Walk-in Patient (Cash)</option>
-                     {customers.filter(c => c.storeId === currentStore.id).map(c => (
-                       <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                     ))}
-                   </select>
+                   <div className="relative">
+                     <input
+                        type="text"
+                        value={customerSearchTerm}
+                        onChange={e => {
+                          setCustomerSearchTerm(e.target.value);
+                          setIsCustomerDropdownOpen(true);
+                          if (e.target.value === '') setCustomerId(''); 
+                        }}
+                        onFocus={() => setIsCustomerDropdownOpen(true)}
+                        onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)}
+                        placeholder="Search name or phone..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-amber-400"
+                     />
+                     
+                     <AnimatePresence>
+                       {isCustomerDropdownOpen && (
+                         <motion.div 
+                           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                           className="absolute bottom-[calc(100%+8px)] left-0 w-full bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto z-50 custom-scrollbar"
+                         >
+                           <button
+                             type="button"
+                             onClick={() => {
+                               setCustomerId('');
+                               setCustomerSearchTerm('');
+                               setIsCustomerDropdownOpen(false);
+                             }}
+                             className="w-full text-left px-4 py-3 hover:bg-slate-700 text-sm font-bold text-slate-400 border-b border-slate-700/50"
+                           >
+                             Walk-in Patient (Cash)
+                           </button>
+                           {filteredCustomers.map(c => (
+                             <button
+                               key={c.id}
+                               type="button"
+                               onClick={() => {
+                                 setCustomerId(c.id);
+                                 setCustomerSearchTerm(`${c.name} (${c.phone || 'N/A'})`);
+                                 setIsCustomerDropdownOpen(false);
+                               }}
+                               className="w-full text-left px-4 py-3 hover:bg-slate-700 text-sm font-bold text-white transition-colors border-b border-slate-700/50 flex justify-between"
+                             >
+                               <span>{c.name}</span>
+                               <span className="text-amber-400 text-xs">{c.phone}</span>
+                             </button>
+                           ))}
+                           {filteredCustomers.length === 0 && customerSearchTerm !== '' && (
+                             <div className="px-4 py-3 text-xs text-slate-500 italic">No customer found</div>
+                           )}
+                         </motion.div>
+                       )}
+                     </AnimatePresence>
+                   </div>
                  </div>
+
                  <div className="flex-1">
                    <label className="text-[10px] text-slate-500 uppercase tracking-widest block mb-1">Prescription Ref</label>
                    <input 
@@ -940,6 +992,7 @@ const Sales: React.FC<SalesProps> = ({
                    />
                  </div>
               </div>
+              
               <div className="flex gap-4">
                  <div className="w-24">
                    <label className="text-[10px] text-slate-500 uppercase tracking-widest block mb-1">Discount %</label>
@@ -979,7 +1032,6 @@ const Sales: React.FC<SalesProps> = ({
               </div>
            </div>
            
-           {/* Right Summary */}
            <div className="md:col-span-4 flex flex-col justify-end space-y-3 text-right bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
               <div className="flex justify-between text-slate-400 text-sm">
                 <span className="uppercase tracking-widest text-[10px] font-bold">Subtotal:</span> 
@@ -1006,7 +1058,12 @@ const Sales: React.FC<SalesProps> = ({
 
         <div className="p-4 bg-slate-900 flex justify-end gap-4 border-t border-slate-800">
            <button 
-             onClick={() => { setCart([]); setIsSessionActive(false); }} 
+             onClick={() => { 
+                setCart([]); 
+                setCustomerSearchTerm('');
+                setCustomerId('');
+                setIsSessionActive(false); 
+             }} 
              className="px-6 py-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-xl font-bold hover:text-white hover:bg-slate-700 transition-colors text-[10px] uppercase tracking-widest"
            >
              Close Session
