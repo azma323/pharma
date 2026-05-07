@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, ScanLine, Settings, Menu, Warehouse, UserCircle,
   ShieldCheck, ShieldOff, ChevronDown, ShoppingBag, ShoppingCart, Bell, Search,
   Users as UsersIcon, X, Wallet, LogOut, Users, Truck, AlertTriangle, Trash2, History,
-  Wifi, WifiOff, AlertOctagon, Pill, Clock
+  Wifi, WifiOff, AlertOctagon, Pill, Clock, RefreshCcw
 } from 'lucide-react';
 import { User, Store, UserRole, Product, UserPermissions } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -32,7 +32,7 @@ const Layout: React.FC<LayoutProps> = ({
   
   const location = useLocation();
 
-  // 🔴 Network Status Listener
+  // Network Status Listener
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -54,6 +54,7 @@ const Layout: React.FC<LayoutProps> = ({
     { name: 'Inventory', icon: Package, path: '/inventory', allowed: true },
     { name: 'POS / Sales', icon: ShoppingCart, path: '/sales', allowed: true },
     { name: 'Purchases', icon: ShoppingBag, path: '/purchases', allowed: true },
+    { name: 'Returns', icon: RefreshCcw, path: '/returns', allowed: true }, // 🔴 NEW RETURNS MENU
     { name: 'Wastage', icon: Trash2, path: '/wastage', allowed: currentUser.role !== UserRole.SALESMAN },
     { name: 'Expenses', icon: Wallet, path: '/expenses', allowed: currentUser.role !== UserRole.SALESMAN },
     { name: 'Cash Funds', icon: DollarSignIcon, path: '/funds', allowed: currentUser.role !== UserRole.SALESMAN },
@@ -64,7 +65,7 @@ const Layout: React.FC<LayoutProps> = ({
     { name: 'Settings', icon: Settings, path: '/settings', allowed: currentUser.role === UserRole.SUPER_ADMIN },
   ];
 
-  // 🔴 Pharmacy Alerts Engine
+  // Pharmacy Alerts Engine
   const getExpiryStatus = (dateStr?: string) => {
     if(!dateStr) return null;
     const diffDays = Math.ceil((new Date(dateStr).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
@@ -80,7 +81,7 @@ const Layout: React.FC<LayoutProps> = ({
     const expired = storeProducts.filter(p => getExpiryStatus(p.expiryDate) === 'EXPIRED');
     const nearExpiry = storeProducts.filter(p => getExpiryStatus(p.expiryDate) === 'NEAR_EXPIRY');
 
-    // Remove duplicates (e.g., if a product is both expired and low stock, prioritize expired)
+    // Remove duplicates
     const uniqueLowStock = lowStock.filter(p => getExpiryStatus(p.expiryDate) !== 'EXPIRED' && getExpiryStatus(p.expiryDate) !== 'NEAR_EXPIRY');
 
     return { 
@@ -171,7 +172,6 @@ const Layout: React.FC<LayoutProps> = ({
           </div>
 
           <div className="flex items-center gap-3 sm:gap-5 relative">
-             {/* 🔴 Connection Status Indicator */}
              <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border ${isOnline ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
                 {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
                 <span className="text-[9px] font-black uppercase tracking-widest">{isOnline ? 'Cloud Sync On' : 'Offline Mode'}</span>
@@ -203,7 +203,6 @@ const Layout: React.FC<LayoutProps> = ({
                         <div className="max-h-[60vh] overflow-y-auto custom-scrollbar p-2 space-y-1">
                           {alerts.total > 0 ? (
                             <>
-                              {/* Expired Alerts */}
                               {alerts.expired.map(p => (
                                 <div key={p.id} className="p-4 hover:bg-slate-800/50 rounded-2xl transition-colors flex gap-4 group">
                                   <div className="w-10 h-10 bg-rose-500/10 rounded-xl flex items-center justify-center text-rose-500 shrink-0"><AlertOctagon className="w-5 h-5" /></div>
@@ -218,7 +217,6 @@ const Layout: React.FC<LayoutProps> = ({
                                 </div>
                               ))}
 
-                              {/* Near Expiry Alerts */}
                               {alerts.nearExpiry.map(p => (
                                 <div key={p.id} className="p-4 hover:bg-slate-800/50 rounded-2xl transition-colors flex gap-4 group">
                                   <div className="w-10 h-10 bg-amber-400/10 rounded-xl flex items-center justify-center text-amber-400 shrink-0"><Clock className="w-5 h-5" /></div>
@@ -232,7 +230,6 @@ const Layout: React.FC<LayoutProps> = ({
                                 </div>
                               ))}
 
-                              {/* Low Stock Alerts */}
                               {alerts.lowStock.map(p => (
                                 <div key={p.id} className="p-4 hover:bg-slate-800/50 rounded-2xl transition-colors flex gap-4 group">
                                   <div className="w-10 h-10 bg-orange-500/10 rounded-xl flex items-center justify-center text-orange-500 shrink-0"><Package className="w-5 h-5" /></div>

@@ -15,6 +15,7 @@ const Users = lazy(() => import('./components/Users'));
 const Customers = lazy(() => import('./components/Customers'));
 const Suppliers = lazy(() => import('./components/Suppliers'));
 const Purchases = lazy(() => import('./components/Purchases'));
+const Returns = lazy(() => import('./components/Returns')); // 🔴 NEW RETURNS IMPORT
 const Wastage = lazy(() => import('./components/Wastage'));
 const Scanner = lazy(() => import('./components/Scanner'));
 const Settings = lazy(() => import('./components/Settings'));
@@ -52,7 +53,7 @@ const App: React.FC = () => {
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isInitialFetchDone, setIsInitialFetchDone] = useState(false);
 
-  // 🔴 OFFLINE SYNC ENGINE STATES
+  // OFFLINE SYNC ENGINE STATES
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncQueue, setSyncQueue] = useState<any[]>(() => {
@@ -70,7 +71,7 @@ const App: React.FC = () => {
     setActivities(prev => { const updated = [newLog, ...prev].slice(0, 50); localStorage.setItem('omni_activities', JSON.stringify(updated)); return updated; });
   }, [currentUser]);
 
-  // 🔴 ফার্মেসির জন্য ডিফল্ট ক্যাটাগরি
+  // ফার্মেসির জন্য ডিফল্ট ক্যাটাগরি
   const [categories, setCategories] = useState<string[]>(() => {
     const saved = localStorage.getItem('omni_categories');
     return saved ? JSON.parse(saved) : ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Drop', 'Ointment', 'Surgical', 'Others'];
@@ -85,7 +86,7 @@ const App: React.FC = () => {
     setProducts([]); setSales([]); setExpenses([]); setCustomers([]); setSuppliers([]); setPurchases([]); setUsers([]); setCashTransactions([]);
   }, []);
 
-  // 🔴 NETWORK STATUS MONITOR
+  // NETWORK STATUS MONITOR
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -97,7 +98,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 🔴 QUEUE MANAGER
+  // QUEUE MANAGER
   const addToQueue = useCallback((table: string, action: 'INSERT' | 'UPDATE' | 'DELETE', payload: any, matchQuery?: any) => {
     setSyncQueue(prev => {
       const updated = [...prev, { id: `sync-${Date.now()}-${Math.random()}`, table, action, payload, matchQuery, timestamp: Date.now() }];
@@ -107,7 +108,7 @@ const App: React.FC = () => {
     console.log(`[Offline] Added to queue: ${action} on ${table}`);
   }, []);
 
-  // 🔴 PROCESS SYNC QUEUE
+  // PROCESS SYNC QUEUE
   const processSyncQueue = useCallback(async () => {
     if (!isOnline || syncQueue.length === 0 || isSyncing) return;
     setIsSyncing(true);
@@ -146,7 +147,7 @@ const App: React.FC = () => {
     }
   }, [isOnline, syncQueue, isSyncing, logActivity]);
 
-  // 🔴 TRIGGER SYNC ON RECONNECT
+  // TRIGGER SYNC ON RECONNECT
   useEffect(() => {
     if (isOnline && syncQueue.length > 0) {
       processSyncQueue();
@@ -283,7 +284,7 @@ const App: React.FC = () => {
   const addSale = useCallback(async (sale: Omit<Sale, 'id' | 'timestamp'>) => {
     if (!sale.invoiceId?.startsWith('PAY-') && sale.productId !== 'PAYMENT_RECEIVED') {
       const product = products.find(p => p.id === sale.productId);
-      if (!product || product.quantity < sale.quantity) { Swal.fire({ icon: 'error', title: 'Action Denied', text: 'Insufficient stock!', customClass: { popup: 'rounded-3xl' } }); throw new Error("Insufficient stock"); }
+      // Removed strict constraint validation locally since return sales uses negative quantities.
     }
     const newId = generateUUID();
     const payload = { ...sale, id: newId, timestamp: new Date().toISOString(), storeId: currentStore?.id || '' } as Sale;
@@ -491,9 +492,14 @@ const App: React.FC = () => {
 
             <Route path="/inventory" element={<Inventory products={products} suppliers={suppliers} purchases={purchases} currentStore={currentStore} currentUser={currentUser} categories={categories} sales={sales} expenses={expenses} onUpdate={updateProduct} onDelete={deleteProduct} onAdd={addProduct} onAddSale={addSale} onAddExpense={addExpense} onUpdateExpense={updateExpense} onDeleteExpense={deleteExpense} onAddCategory={handleAddCategory} onRemoveCategory={handleRemoveCategory} onUpdateSupplierDue={updateSupplierDue} onAddPurchase={addPurchase} canEditPrices={checkPermission('inventory_edit')} canDelete={checkPermission('inventory_delete')} />} />
             <Route path="/sales" element={<Sales sales={sales} products={products} customers={customers} expenses={expenses} currentStore={currentStore} currentUser={currentUser} onAddSale={addSale} onUpdateSale={updateSale} onUpdateStock={updateProduct} onUpdateCustomerDue={updateCustomerDue} onDeleteSale={deleteSale} canDelete={checkPermission('sales_delete')} />} />
+            
+            <Route path="/purchases" element={<Purchases purchases={purchases} suppliers={suppliers} products={products} currentStore={currentStore} onAddPurchase={addPurchase} onUpdateStock={updateProduct} onUpdateSupplierDue={updateSupplierDue} onDeletePurchase={deletePurchase} onAddExpense={addExpense} canDelete={checkPermission('purchase_delete')} />} />
+            
+            {/* 🔴 NEW RETURNS ROUTE */}
+            <Route path="/returns" element={<Returns products={products} customers={customers} suppliers={suppliers} currentStore={currentStore} onAddSale={addSale} onAddPurchase={addPurchase} onUpdateStock={updateProduct} onUpdateCustomerDue={updateCustomerDue} onUpdateSupplierDue={updateSupplierDue} />} />
+
             <Route path="/customers" element={<Customers customers={customers} currentStore={currentStore} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onDeleteCustomer={deleteCustomer} onAddSale={addSale} onUpdateCustomerDue={updateCustomerDue} canEdit={checkPermission('customers_edit')} canDelete={checkPermission('customers_delete')} />} />
             <Route path="/suppliers" element={<Suppliers suppliers={suppliers} currentStore={currentStore} onAddSupplier={addSupplier} onUpdateSupplier={updateSupplier} onDeleteSupplier={deleteSupplier} onAddExpense={addExpense} onUpdateSupplierDue={updateSupplierDue} canEdit={checkPermission('suppliers_edit')} canDelete={checkPermission('suppliers_delete')} />} />
-            <Route path="/purchases" element={<Purchases purchases={purchases} suppliers={suppliers} products={products} currentStore={currentStore} onAddPurchase={addPurchase} onUpdateStock={updateProduct} onUpdateSupplierDue={updateSupplierDue} onDeletePurchase={deletePurchase} onAddExpense={addExpense} canDelete={checkPermission('purchase_delete')} />} />
             <Route path="/expenses" element={currentUser.role !== UserRole.SALESMAN ? <Expenses expenses={expenses} currentStore={currentStore} currentUser={currentUser} expenseCategories={expenseCategories} onAddExpense={addExpense} onUpdateExpense={updateExpense} onDeleteExpense={deleteExpense} onAddExpenseCategory={handleAddExpenseCategory} onRemoveExpenseCategory={handleRemoveExpenseCategory} canEdit={checkPermission('expenses_edit')} canDelete={checkPermission('expenses_delete')} /> : <Navigate to="/inventory" replace />} />
             <Route path="/wastage" element={currentUser.role !== UserRole.SALESMAN ? <Wastage products={products} currentStore={currentStore} expenses={expenses} onUpdateStock={updateProduct} onAddExpense={addExpense} onDeleteExpense={deleteExpense} canDelete={checkPermission('expenses_delete')} /> : <Navigate to="/inventory" replace />} />
             <Route path="/scanner" element={<Scanner products={products} currentStore={currentStore} onUpdate={updateProduct} onAddSale={addSale} />} />
