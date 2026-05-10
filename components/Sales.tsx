@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Sale, Product, Store, User, Customer, Expense } from '../types';
 import { 
   ShoppingCart, Search, User as UserIcon, Hash, DollarSign, Trash2, X,
   ArrowRight, ScanLine, CameraOff, Check, History, LayoutDashboard,
   TrendingUp, Printer, Download, CreditCard, ChevronLeft, ChevronRight,
-  RotateCcw, AlertOctagon, Zap, ChevronDown, CheckCircle2, Keyboard, Package, FileText, Pill
+  RotateCcw, AlertOctagon, Zap, ChevronDown, CheckCircle2, Keyboard, Package, FileText, Pill, Wrench
 } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'framer-motion';
@@ -56,10 +56,14 @@ const Sales: React.FC<SalesProps> = ({
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
 
-  // 🔴 Cart & Checkout States
+  // SERVICING / EXTRA CHARGE STATES
+  const [serviceName, setServiceName] = useState('');
+  const [servicePrice, setServicePrice] = useState('');
+  const [serviceQty, setServiceQty] = useState('1');
+
+  // Cart & Checkout States
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerId, setCustomerId] = useState('');
-  // 🔴 New States for Customer Smart Search
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
 
@@ -76,6 +80,10 @@ const Sales: React.FC<SalesProps> = ({
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [saleToReturn, setSaleToReturn] = useState<Sale | null>(null);
   const [returnQty, setReturnQty] = useState(1);
+
+  // AUTO PRINT STATE
+  const [autoPrint, setAutoPrint] = useState(true);
+  const [pendingAutoPrintInvoice, setPendingAutoPrintInvoice] = useState<string | null>(null);
 
   useEffect(() => {
     if (isSessionActive && !invoiceId) {
@@ -98,14 +106,14 @@ const Sales: React.FC<SalesProps> = ({
       p.storeId === currentStore.id && 
       (
         p.sku.toLowerCase().includes(lowerTerm) || 
-        p.name.toLowerCase().includes(lowerTerm) || 
-        ((p as any).genericName && (p as any).genericName.toLowerCase().includes(lowerTerm))
+        p.name.toLowerCase().includes(lowerTerm) ||
+        (p.genericName && p.genericName.toLowerCase().includes(lowerTerm))
       )
     );
     setProductSearchResults(results);
   }, [productSearchTerm, products, currentStore.id]);
 
-  // 🔴 Customer Phone/Name Search Logic
+  // Customer Phone/Name Search Logic
   const filteredCustomers = useMemo(() => {
     const lowerTerm = customerSearchTerm.toLowerCase();
     return customers.filter(c => 
@@ -116,6 +124,21 @@ const Sales: React.FC<SalesProps> = ({
       )
     );
   }, [customers, currentStore.id, customerSearchTerm]);
+
+  // Auto Print Monitor
+  useEffect(() => {
+    if (pendingAutoPrintInvoice) {
+      const invoiceExists = sales.some(s => s.invoiceId === pendingAutoPrintInvoice);
+      if (invoiceExists) {
+        setSelectedInvoiceForPrint(pendingAutoPrintInvoice);
+        setShowPrintModal(true);
+        setTimeout(() => {
+          window.print();
+          setPendingAutoPrintInvoice(null);
+        }, 500); 
+      }
+    }
+  }, [sales, pendingAutoPrintInvoice]);
 
   const safeStopScanner = async () => {
     if (scannerRef.current) {
@@ -138,7 +161,7 @@ const Sales: React.FC<SalesProps> = ({
             if (product) {
                 processAddToCart(product);
             } else {
-                setScannerError(`Product not found: ${decodedText}`);
+                setScannerError(`Medicine not found: ${decodedText}`);
             }
             setIsScanning(false); 
             safeStopScanner(); 
@@ -157,17 +180,17 @@ const Sales: React.FC<SalesProps> = ({
   };
 
   const processAddToCart = (product: Product) => {
-    if (product.quantity <= 0) {
+    if (product.quantity <= 0 && !product.id.startsWith('SERVICE_')) {
         alert(`Out of Stock: ${product.name}`);
         return;
     }
     const existing = cart.find(c => c.product.id === product.id && c.saleUnit === 'PIECE');
     if (existing) {
-       if (existing.quantity + 1 > product.quantity) {
-           alert(`Not enough stock for ${product.name}. Available: ${product.quantity}`);
+       if (!product.id.startsWith('SERVICE_') && existing.quantity + 1 > product.quantity) {
+           alert(`Not enough stock for ${product.name}. Available: ${product.quantity} Pieces`);
            return;
        }
-       setCart(cart.map(c => c.product.id === product.id && c.saleUnit === 'PIECE' ? {...c, quantity: c.quantity + 1} : c));
+       setCart(cart.map(c => c.cartId === existing.cartId ? {...c, quantity: c.quantity + 1} : c));
     } else {
        setCart([...cart, { 
            cartId: Math.random().toString(), 
@@ -179,6 +202,41 @@ const Sales: React.FC<SalesProps> = ({
     }
     setProductSearchTerm(''); 
     if(searchInputRef.current) searchInputRef.current.focus();
+  };
+
+  // ADD SERVICE / DOCTOR FEE
+  const handleAddService = () => {
+    if (!serviceName.trim()) return alert('Please enter a service or fee name.');
+    const price = parseFloat(servicePrice);
+    const qty = parseFloat(serviceQty);
+    
+    if (isNaN(price) || price < 0) return alert('Invalid service price.');
+    if (isNaN(qty) || qty <= 0) return alert('Invalid quantity.');
+
+    const serviceProduct = {
+      id: `SERVICE_${Date.now()}`,
+      name: `[Service] ${serviceName}`,
+      sku: 'SERVICE',
+      price: price,
+      buyingPrice: 0,
+      quantity: 999999, // Infinite stock
+      category: 'Service',
+      storeId: currentStore.id,
+      minThreshold: 0,
+      lastUpdated: new Date().toISOString()
+    } as Product;
+
+    setCart([...cart, { 
+        cartId: Math.random().toString(), 
+        product: serviceProduct, 
+        quantity: qty, 
+        saleUnit: 'PIECE',
+        unitPrice: price 
+    }]);
+
+    setServiceName('');
+    setServicePrice('');
+    setServiceQty('1');
   };
 
   const handleProductSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -194,20 +252,31 @@ const Sales: React.FC<SalesProps> = ({
     }
   };
 
+  const calculateStockEquivalent = (product: Product, qty: number, unit: 'PIECE'|'STRIP'|'BOX') => {
+    if (unit === 'PIECE') return qty;
+    if (unit === 'STRIP') return qty * ((product as any).piecesPerStrip || 10);
+    if (unit === 'BOX') return qty * ((product as any).piecesPerStrip || 10) * ((product as any).stripsPerBox || 10);
+    return qty;
+  };
+
+  const calculateDefaultPrice = (product: Product, unit: 'PIECE'|'STRIP'|'BOX') => {
+    if (unit === 'PIECE') return product.price;
+    if (unit === 'STRIP') return product.price * ((product as any).piecesPerStrip || 10);
+    if (unit === 'BOX') return product.price * ((product as any).piecesPerStrip || 10) * ((product as any).stripsPerBox || 10);
+    return product.price;
+  };
+
   const handleCartQtyChange = (cartId: string, qty: number) => {
     if (qty < 1 || isNaN(qty)) return;
     setCart(cart.map(c => c.cartId === cartId ? { ...c, quantity: qty } : c));
   };
 
-  const handleCartUnitChange = (cartId: string, unit: 'PIECE' | 'STRIP' | 'BOX') => {
+  const handleCartUnitChange = (cartId: string, unit: 'PIECE'|'STRIP'|'BOX') => {
     setCart(cart.map(c => {
-       if (c.cartId === cartId) {
-          let multiplier = 1;
-          if (unit === 'BOX' && (c.product as any).piecesPerBox) multiplier = (c.product as any).piecesPerBox;
-          if (unit === 'STRIP' && (c.product as any).piecesPerStrip) multiplier = (c.product as any).piecesPerStrip;
-          return { ...c, saleUnit: unit, unitPrice: c.product.price * multiplier };
-       }
-       return c;
+      if (c.cartId === cartId) {
+        return { ...c, saleUnit: unit, unitPrice: calculateDefaultPrice(c.product, unit) };
+      }
+      return c;
     }));
   };
 
@@ -226,60 +295,149 @@ const Sales: React.FC<SalesProps> = ({
   const finalAmountPaid = isWalkIn ? cartTotalAfterDiscount : (parseFloat(amountPaid) || 0);
   const cartDue = Math.max(0, cartTotalAfterDiscount - finalAmountPaid);
 
+  const printDirectReceipt = useCallback((invId: string, printCart: CartItem[], cName: string, fPaid: number, fDue: number, dsc: number) => {
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    
+    const cartHTML = printCart.map(item => {
+      const unitDisplay = item.product.id.startsWith('SERVICE_') ? '' : item.saleUnit;
+      return `
+        <div class="row">
+          <span style="flex: 2;">${item.product.name}</span>
+          <span style="flex: 1; text-align: center;">${item.quantity} ${unitDisplay}</span>
+          <span style="flex: 1; text-align: right;">${(item.quantity * item.unitPrice).toFixed(2)}</span>
+        </div>
+      `;
+    }).join('');
+
+    const subTotal = printCart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+
+    const receiptHTML = `
+      <html>
+        <head>
+          <title>Receipt - ${invId}</title>
+          <style>
+            @page { margin: 0; }
+            body { 
+              font-family: 'Courier New', Courier, monospace; 
+              width: 80mm; 
+              padding: 10px; 
+              color: #000; 
+              font-size: 12px; 
+              margin: 0 auto;
+            }
+            .center { text-align: center; }
+            .bold { font-weight: bold; }
+            .row { display: flex; justify-content: space-between; margin: 3px 0; }
+            .divider { border-bottom: 1px dashed #000; margin: 8px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="center bold" style="font-size: 16px; margin-bottom: 5px;">${currentStore.name}</div>
+          <div class="center" style="font-size: 10px;">${currentStore.location || ''}</div>
+          <div class="center bold" style="margin-top: 5px; font-size: 14px;">PHARMACY INVOICE</div>
+          <div class="divider"></div>
+          
+          <div class="row"><span>Invoice:</span> <span>${invId}</span></div>
+          <div class="row"><span>Date:</span> <span>${new Date().toLocaleString('en-US')}</span></div>
+          <div class="row"><span>Patient:</span> <span>${cName}</span></div>
+          
+          <div class="divider"></div>
+          <div class="row bold">
+            <span style="flex: 2;">Medicine</span>
+            <span style="flex: 1; text-align: center;">Qty</span>
+            <span style="flex: 1; text-align: right;">Total</span>
+          </div>
+          <div class="divider"></div>
+          
+          ${cartHTML}
+          
+          <div class="divider"></div>
+          
+          <div class="row"><span>Subtotal:</span> <span>${subTotal.toFixed(2)}</span></div>
+          ${dsc > 0 ? `<div class="row"><span>Discount:</span> <span>-${(subTotal * dsc / 100).toFixed(2)}</span></div>` : ''}
+          <div class="row bold" style="font-size: 14px; margin-top: 5px;">
+            <span>Net Total:</span>
+            <span>${cartTotalAfterDiscount.toFixed(2)}</span>
+          </div>
+          <div class="row"><span>Amount Paid:</span> <span>${fPaid.toFixed(2)}</span></div>
+          <div class="row"><span>Due:</span> <span>${fDue.toFixed(2)}</span></div>
+          
+          <div class="divider"></div>
+          <div class="center" style="font-size: 10px; margin-top: 15px;">Get well soon!</div>
+          <div class="center" style="font-size: 9px; margin-top: 5px;">Powered by BDT Soft</div>
+        </body>
+      </html>
+    `;
+    
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(receiptHTML);
+      doc.close();
+      
+      iframe.contentWindow?.focus();
+      setTimeout(() => {
+        iframe.contentWindow?.print();
+        setTimeout(() => document.body.removeChild(iframe), 1000);
+      }, 300);
+    }
+  }, [currentStore.name, currentStore.location, cartTotalAfterDiscount]);
+
   const handleConfirmSale = () => {
     if (cart.length === 0) return alert('Cart is empty. Please add items to sell.');
+    
     if (finalAmountPaid < cartTotalAfterDiscount && isWalkIn) {
-       return alert('Walk-in patients cannot have dues. Please select a patient for credit sales.');
+       return alert('Walk-in patients cannot have dues. Please select a patient profile for credit sales.');
     }
     if (finalAmountPaid > cartTotalAfterDiscount) {
        return alert('Amount paid cannot exceed the total cart value.');
     }
 
+    // Stock Checking (Exclude Services)
     for (const item of cart) {
-        let multiplier = 1;
-        if (item.saleUnit === 'BOX' && (item.product as any).piecesPerBox) multiplier = (item.product as any).piecesPerBox;
-        if (item.saleUnit === 'STRIP' && (item.product as any).piecesPerStrip) multiplier = (item.product as any).piecesPerStrip;
-        const baseQtyNeeded = item.quantity * multiplier;
-
-        if (baseQtyNeeded > item.product.quantity) {
-            return alert(`Not enough stock for ${item.product.name}. Available: ${item.product.quantity} Base Units.`);
+        if (!item.product.id.startsWith('SERVICE_')) {
+            const requiredPieces = calculateStockEquivalent(item.product, item.quantity, item.saleUnit);
+            if (requiredPieces > item.product.quantity) {
+                return alert(`Not enough stock for ${item.product.name}. Required: ${requiredPieces} Pcs, Available: ${item.product.quantity} Pcs.`);
+            }
         }
     }
 
     let remainingPaid = finalAmountPaid;
+    const customerNameDisplay = isWalkIn ? 'Cash Sale (Walk-in)' : (customers.find(c => c.id === customerId)?.name || 'Walk-in Patient');
     
     cart.forEach(item => {
-       let multiplier = 1;
-       if (item.saleUnit === 'BOX' && (item.product as any).piecesPerBox) multiplier = (item.product as any).piecesPerBox;
-       if (item.saleUnit === 'STRIP' && (item.product as any).piecesPerStrip) multiplier = (item.product as any).piecesPerStrip;
-       const baseQtyToDeduct = item.quantity * multiplier;
-
        const itemTotal = item.quantity * item.unitPrice * (1 - (discount / 100));
        const itemPaid = Math.min(itemTotal, remainingPaid);
-       const itemDue = itemTotal - itemPaid;
+       const itemDue = (itemTotal - itemPaid);
        remainingPaid -= itemPaid;
 
-       const displayProductName = item.saleUnit === 'PIECE' ? item.product.name : `${item.product.name} (${item.quantity} ${item.saleUnit})`;
+       const isService = item.product.id.startsWith('SERVICE_');
+       const deductedPieces = isService ? 0 : calculateStockEquivalent(item.product, item.quantity, item.saleUnit);
 
+       // 🔴 ZERO referenceNote IN THE ENTIRE CALL
        onAddSale({
           invoiceId,
           customerId: isWalkIn ? (null as unknown as string) : customerId,
-          customerName: isWalkIn ? 'Cash Sale (Walk-in)' : (customers.find(c => c.id === customerId)?.name || 'Walk-in Patient'),
+          customerName: customerNameDisplay,
           productId: item.product.id,
-          productName: displayProductName,
-          quantity: baseQtyToDeduct, 
-          buyingPrice: item.product.buyingPrice,
-          unitPrice: itemTotal / baseQtyToDeduct, 
+          productName: isService ? item.product.name : `${item.product.name} [${item.saleUnit}]`,
+          quantity: item.quantity, 
+          buyingPrice: isService ? 0 : (item.product.buyingPrice * (deductedPieces / item.quantity)),
+          unitPrice: item.unitPrice, 
           discount: discount,
           totalPrice: itemTotal,
           amountPaid: itemPaid,
           amountDue: itemDue,
           paymentMethod: paymentMethod, 
-          storeId: currentStore.id,
-          prescriptionRef: prescriptionRef || undefined 
+          storeId: currentStore.id
        } as any);
 
-       onUpdateStock(item.product.id, { quantity: item.product.quantity - baseQtyToDeduct });
+       if (!isService) {
+         onUpdateStock(item.product.id, { quantity: item.product.quantity - deductedPieces });
+       }
     });
 
     if (!isWalkIn && cartDue > 0) {
@@ -289,7 +447,11 @@ const Sales: React.FC<SalesProps> = ({
     setShowSuccessToast(true); 
     setTimeout(() => setShowSuccessToast(false), 2000); 
     
-    // 🔴 Reset everything including customer search
+    // AUTO PRINT TRIGGER
+    if (autoPrint) {
+       printDirectReceipt(invoiceId, cart, customerNameDisplay, finalAmountPaid, cartDue, discount);
+    }
+
     setCart([]);
     setCustomerId('');
     setCustomerSearchTerm('');
@@ -329,6 +491,7 @@ const Sales: React.FC<SalesProps> = ({
         } else cashRefund = refundAmount;
     } else cashRefund = refundAmount; 
 
+    // 🔴 NO referenceNote IN RETURNS
     onAddSale({
         invoiceId: `RET-${saleToReturn.invoiceId}`,
         customerId: saleToReturn.customerId,
@@ -347,17 +510,27 @@ const Sales: React.FC<SalesProps> = ({
     });
 
     const product = products.find(p => p.id === saleToReturn.productId);
-    if (product) onUpdateStock(product.id, { quantity: product.quantity + returnQty });
+    if (product && !saleToReturn.productId.startsWith('SERVICE_')) {
+       let piecesToRestore = returnQty;
+       if (saleToReturn.productName.includes('[STRIP]')) piecesToRestore = returnQty * ((product as any).piecesPerStrip || 10);
+       else if (saleToReturn.productName.includes('[BOX]')) piecesToRestore = returnQty * ((product as any).piecesPerStrip || 10) * ((product as any).stripsPerBox || 10);
+       
+       onUpdateStock(product.id, { quantity: product.quantity + piecesToRestore });
+    }
     if (dueAdjustment > 0 && saleToReturn.customerId) onUpdateCustomerDue(saleToReturn.customerId, -dueAdjustment);
 
-    alert(`Return processed!\nRestored: +${returnQty}\nDue Adjusted: $${dueAdjustment.toFixed(2)}\nCash Refund: $${cashRefund.toFixed(2)}`);
+    alert(`Return processed!\nDue Adjusted: $${dueAdjustment.toFixed(2)}\nCash Refund: $${cashRefund.toFixed(2)}`);
     setIsReturnModalOpen(false); setSaleToReturn(null);
   };
 
   const handleRemoveFromLedger = (saleToRemove: Sale) => {
     const product = products.find(p => p.id === saleToRemove.productId);
-    if (product) {
-      onUpdateStock(product.id, { quantity: product.quantity + saleToRemove.quantity });
+    if (product && !saleToRemove.productId.startsWith('SERVICE_')) {
+      let piecesToRestore = saleToRemove.quantity;
+      if (saleToRemove.productName.includes('[STRIP]')) piecesToRestore = saleToRemove.quantity * ((product as any).piecesPerStrip || 10);
+      else if (saleToRemove.productName.includes('[BOX]')) piecesToRestore = saleToRemove.quantity * ((product as any).piecesPerStrip || 10) * ((product as any).stripsPerBox || 10);
+
+      onUpdateStock(product.id, { quantity: product.quantity + piecesToRestore });
     }
     if (saleToRemove.customerId && saleToRemove.amountDue > 0) {
       onUpdateCustomerDue(saleToRemove.customerId, -saleToRemove.amountDue);
@@ -408,8 +581,9 @@ const Sales: React.FC<SalesProps> = ({
     return { totalSales, todayCash, todayCard, todayBkash, todayNagad, totalProfit: totalProfit - wastageLoss, totalExpense, netBalance };
   }, [sales, products, expenses, currentStore.id]);
 
+  // 🔴 REMOVED referenceNote FROM EXPORT
   const exportToCSV = () => {
-    const headers = ['Invoice', 'Customer', 'Product', 'Qty', 'Unit Price', 'Discount', 'Total', 'Paid', 'Due', 'Payment Method', 'Prescription', 'Date'];
+    const headers = ['Invoice', 'Patient', 'Medicine', 'Qty', 'Unit Price', 'Discount', 'Total', 'Paid', 'Due', 'Payment Method', 'Date'];
     const data = sales
       .filter(s => s.storeId === currentStore.id)
       .map(saleRecord => {
@@ -426,7 +600,6 @@ const Sales: React.FC<SalesProps> = ({
           (saleRecord.amountPaid || 0).toFixed(2),
           (saleRecord.amountDue || 0).toFixed(2),
           saleRecord.paymentMethod || 'Cash',
-          (saleRecord as any).prescriptionRef || 'N/A',
           new Date(saleRecord.timestamp).toLocaleDateString()
         ];
       });
@@ -436,7 +609,7 @@ const Sales: React.FC<SalesProps> = ({
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `pharmacy_sales_${currentStore.name.replace(/\s+/g, '_')}.csv`);
+    link.setAttribute("download", `sales_${currentStore.name.replace(/\s+/g, '_')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -462,12 +635,12 @@ const Sales: React.FC<SalesProps> = ({
       <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight">Pharmacy POS</h1>
-            <p className="text-slate-500 font-medium italic">Sales & Dispensing terminal for <span className="gold-gradient-text font-black">{currentStore.name}</span></p>
+            <h1 className="text-3xl font-black text-white tracking-tight">Point of Sale</h1>
+            <p className="text-slate-500 font-medium italic">Sales & checkout terminal for <span className="gold-gradient-text font-black">{currentStore.name}</span></p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={exportToCSV} className="p-4 bg-slate-900 border border-slate-800 text-slate-400 rounded-2xl hover:text-white transition-all shadow-xl"><Download className="w-5 h-5" /></button>
-            <button onClick={() => setIsSessionActive(true)} className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 px-6 py-4 rounded-2xl font-black flex items-center gap-3 hover:scale-[1.02] transition-all shadow-xl shadow-amber-900/10 uppercase tracking-widest text-xs">
+            <button onClick={() => setIsSessionActive(true)} className="bg-gradient-to-r from-emerald-500 to-emerald-700 text-white px-6 py-4 rounded-2xl font-black flex items-center gap-3 hover:scale-[1.02] transition-all shadow-xl shadow-emerald-900/10 uppercase tracking-widest text-xs">
               <ShoppingCart className="w-5 h-5 stroke-[3px]" /> Open Terminal
             </button>
           </div>
@@ -516,10 +689,10 @@ const Sales: React.FC<SalesProps> = ({
           <div className="p-6 border-b border-slate-800">
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-amber-400 transition-colors" />
-                <input type="text" placeholder="Search invoice, medicine or patient..." className="w-full pl-12 pr-4 py-4 bg-slate-800 border border-slate-700 rounded-2xl outline-none text-slate-100 focus:border-amber-400 transition-all amber-glow" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
+                <input type="text" placeholder="Search invoice, medicine or patient..." className="w-full pl-12 pr-4 py-4 bg-slate-800 border border-slate-700 rounded-2xl outline-none text-slate-100 focus:border-emerald-400 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
               </div>
-              <div className="relative flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-2xl px-4 focus-within:border-amber-400 transition-colors">
+              <div className="relative flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-2xl px-4 focus-within:border-emerald-400 transition-colors">
                 <input type="date" className="bg-transparent py-4 outline-none text-xs font-bold text-slate-300 w-full" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
                 {filterDate && <button onClick={() => setFilterDate('')} className="p-1 text-slate-500 hover:text-rose-400"><X className="w-4 h-4" /></button>}
               </div>
@@ -533,7 +706,7 @@ const Sales: React.FC<SalesProps> = ({
                   <th className="px-6 py-5">Date</th>
                   <th className="px-6 py-5">Invoice & Patient</th>
                   <th className="px-6 py-5">Medicine Issued</th>
-                  <th className="px-6 py-5 text-center">Base Qty</th>
+                  <th className="px-6 py-5 text-center">Qty</th>
                   <th className="px-6 py-5 text-right">Settlement</th>
                   <th className="px-6 py-5 text-right">Actions</th>
                 </tr>
@@ -554,7 +727,6 @@ const Sales: React.FC<SalesProps> = ({
                            <span className="text-white">{saleRecord.invoiceId}</span>}
                         </div>
                         <p className="text-xs text-slate-400 font-bold">{saleRecord.customerName}</p>
-                        {(saleRecord as any).prescriptionRef && <p className="text-[9px] text-amber-500 uppercase tracking-widest mt-1"><FileText className="w-3 h-3 inline mr-1"/>{(saleRecord as any).prescriptionRef}</p>}
                       </td>
                       <td className="px-6 py-5 text-sm text-slate-300 flex flex-col">
                         {isPayment ? <span className="text-blue-400 italic font-bold">Due Collection</span> : isReturn ? <span className="text-orange-400 italic font-bold">{saleRecord.productName}</span> : saleRecord.productName}
@@ -573,7 +745,7 @@ const Sales: React.FC<SalesProps> = ({
                             <button onClick={() => handleOpenReturn(saleRecord)} title="Return Item" className="p-2 text-slate-600 hover:text-orange-400"><RotateCcw className="w-4 h-4" /></button>
                           )}
                           {!isPayment && !isVoid && !isReturn && (
-                            <button onClick={() => handlePrint(saleRecord.invoiceId)} className="p-2 text-slate-600 hover:text-amber-400"><Printer className="w-4 h-4" /></button>
+                            <button onClick={() => handlePrint(saleRecord.invoiceId)} className="p-2 text-slate-600 hover:text-emerald-400"><Printer className="w-4 h-4" /></button>
                           )}
                           {canDelete && !isVoid && !isReturn && (
                             saleRecord.amountPaid > 0 && !isPayment ? (
@@ -597,7 +769,7 @@ const Sales: React.FC<SalesProps> = ({
               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, historicalSales.length)} of {historicalSales.length} entries</p>
               <div className="flex items-center gap-2">
                 <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="p-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-400 disabled:opacity-30 hover:bg-slate-700 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                <div className="px-4 py-2 bg-amber-400/10 border border-amber-400/20 rounded-xl"><span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Page {currentPage} of {totalPages}</span></div>
+                <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl"><span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Page {currentPage} of {totalPages}</span></div>
                 <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="p-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-400 disabled:opacity-30 hover:bg-slate-700 transition-colors"><ChevronRight className="w-4 h-4" /></button>
               </div>
             </div>
@@ -615,13 +787,23 @@ const Sales: React.FC<SalesProps> = ({
                  <form onSubmit={handleReturnSubmit} className="space-y-6">
                      <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 mb-6">
                          <p className="text-sm font-bold text-white mb-1">{saleToReturn.productName}</p>
-                         <p className="text-xs text-slate-400">Unit Settlement: ${(saleToReturn.totalPrice / saleToReturn.quantity).toFixed(2)} / base unit</p>
+                         <p className="text-xs text-slate-400">Unit Settlement: ${(saleToReturn.totalPrice / saleToReturn.quantity).toFixed(2)} / unit</p>
                      </div>
 
                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Return Base Quantity</label>
+                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Return Quantity</label>
                          <input type="number" min="1" max={getReturnableQty(saleToReturn)} value={returnQty} onWheel={(e) => (e.target as HTMLInputElement).blur()} onFocus={e => e.target.select()} onChange={e => setReturnQty(parseInt(e.target.value) || 1)} className="w-full px-5 py-4 bg-slate-800 border border-slate-700 rounded-2xl outline-none text-orange-400 font-black focus:border-orange-500" />
                          <p className="text-[10px] text-orange-500/80 font-bold text-right mr-2 mt-1">Max returnable: {getReturnableQty(saleToReturn)} units</p>
+                     </div>
+
+                     <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-2xl">
+                         <p className="text-[10px] font-black text-orange-500 uppercase tracking-widest mb-2">Refund Calculation</p>
+                         <div className="flex justify-between text-xs font-bold text-slate-300 mb-1">
+                             <span>Total Refund Value:</span><span>${(returnQty * (saleToReturn.totalPrice / saleToReturn.quantity)).toFixed(2)}</span>
+                         </div>
+                         <div className="flex justify-between text-xs font-bold text-slate-300">
+                             <span>Will Adjust Due First:</span><span className="text-emerald-400">Auto-calculated</span>
+                         </div>
                      </div>
 
                      <button type="submit" className="w-full bg-orange-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg hover:bg-orange-600 transition-colors">Confirm Refund</button>
@@ -636,7 +818,7 @@ const Sales: React.FC<SalesProps> = ({
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 no-print">
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowPrintModal(false)} className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" />
               <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-2xl bg-white text-slate-950 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 no-print">
                   <h3 className="font-black uppercase tracking-widest text-xs text-slate-500">Invoice Preview</h3>
                   <div className="flex items-center gap-2">
                     <button onClick={() => window.print()} className="bg-slate-950 text-white px-4 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-colors"><Printer className="w-4 h-4" /> Print</button>
@@ -651,7 +833,7 @@ const Sales: React.FC<SalesProps> = ({
                       <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">{currentStore.location}</p>
                     </div>
                     <div className="text-right">
-                      <h2 className="text-xl font-black uppercase tracking-tighter mb-1">Medical Invoice</h2>
+                      <h2 className="text-xl font-black uppercase tracking-tighter mb-1">PHARMACY INVOICE</h2>
                       <p className="text-xs font-bold text-slate-400">{selectedInvoiceForPrint}</p>
                     </div>
                   </div>
@@ -660,12 +842,9 @@ const Sales: React.FC<SalesProps> = ({
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Patient Details</p>
                       <p className="font-black text-lg">{sales.find(s => s.invoiceId === selectedInvoiceForPrint)?.customerName || 'Walk-in Patient'}</p>
-                      {(sales.find(s => s.invoiceId === selectedInvoiceForPrint) as any)?.prescriptionRef && (
-                         <p className="text-xs font-bold text-slate-500 mt-1">Ref: {(sales.find(s => s.invoiceId === selectedInvoiceForPrint) as any)?.prescriptionRef}</p>
-                      )}
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Date Dispensed</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Date</p>
                       <p className="font-black text-lg">{new Date(sales.find(s => s.invoiceId === selectedInvoiceForPrint)?.timestamp || '').toLocaleDateString()}</p>
                     </div>
                   </div>
@@ -673,7 +852,7 @@ const Sales: React.FC<SalesProps> = ({
                   <table className="w-full mb-12">
                     <thead>
                       <tr className="border-b-2 border-slate-950 text-[10px] font-black uppercase tracking-widest">
-                        <th className="py-4 text-left">Medicine Description</th><th className="py-4 text-center">Base Qty</th><th className="py-4 text-right">Unit Price</th><th className="py-4 text-right">Total</th>
+                        <th className="py-4 text-left">Description</th><th className="py-4 text-center">Qty</th><th className="py-4 text-right">Unit Price</th><th className="py-4 text-right">Total</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -697,7 +876,7 @@ const Sales: React.FC<SalesProps> = ({
                   </div>
 
                   <div className="mt-20 pt-12 border-t border-slate-100 text-center">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Thank you for your trust. Get well soon.</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Get well soon!</p>
                   </div>
                 </div>
               </motion.div>
@@ -706,31 +885,50 @@ const Sales: React.FC<SalesProps> = ({
         </AnimatePresence>
 
         <style>{`
+          /* PERFECT PRINT CSS FIX */
           @media print {
-            .no-print { display: none !important; }
-            .print-only { display: block !important; }
-            body { background: white !important; color: black !important; }
+            body * {
+              visibility: hidden;
+            }
+            #printable-invoice, #printable-invoice * {
+              visibility: visible;
+              color: #000 !important;
+            }
+            #printable-invoice {
+              position: absolute;
+              left: 0;
+              top: 0;
+              width: 100%;
+              padding: 20px;
+            }
+            .no-print {
+              display: none !important;
+            }
           }
         `}</style>
       </div>
     );
   }
 
-  // ==============================================================
-  // 🔴 LIVE PHARMACY POS LAYOUT (LOCAL CART WITH BIG SEARCH)
-  // ==============================================================
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col lg:flex-row gap-8 animate-in fade-in zoom-in-95 duration-500 overflow-hidden">
       
-      {/* =====================================
-          LEFT COLUMN: SEARCH & SCANNER
-      ===================================== */}
+      {/* LEFT COLUMN: SEARCH & SCANNER */}
       <div className="lg:w-[400px] flex flex-col bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-8 overflow-y-auto custom-scrollbar relative">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-black text-white tracking-tight uppercase">Product Search</h2>
+            <h2 className="text-xl font-black text-white tracking-tight uppercase">Medicine Search</h2>
             <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]">Scan or Type Name</p>
           </div>
+          {/* Auto Print Toggle Button */}
+          <button 
+            onClick={() => setAutoPrint(!autoPrint)}
+            className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center border ${autoPrint ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+            title={autoPrint ? 'Auto Print is ON' : 'Auto Print is OFF'}
+          >
+            <Printer className="w-4 h-4 mr-1.5" />
+            {autoPrint ? 'Auto-Print' : 'Print OFF'}
+          </button>
         </div>
 
         {showSuccessToast && (
@@ -742,10 +940,9 @@ const Sales: React.FC<SalesProps> = ({
 
         <div className="space-y-6">
           <div className="space-y-2">
-            
             <div className="relative z-[100] group">
               <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
-                 <Keyboard className="w-5 h-5 text-slate-500 group-focus-within:text-amber-400 transition-colors" />
+                 <Keyboard className="w-5 h-5 text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
               </div>
               <input 
                 ref={searchInputRef}
@@ -754,52 +951,45 @@ const Sales: React.FC<SalesProps> = ({
                 autoFocus 
                 onChange={e => setProductSearchTerm(e.target.value)} 
                 onKeyDown={handleProductSearchKeyDown} 
-                placeholder="Medicine Name or SKU..." 
-                className="w-full bg-slate-800 border-2 border-slate-700 text-white rounded-[2rem] py-5 pl-14 pr-16 focus:outline-none transition-all shadow-lg text-lg font-bold focus:border-amber-400 amber-glow" 
+                placeholder="Medicine Name, Generic or SKU..." 
+                className="w-full bg-slate-800 border-2 border-slate-700 text-white rounded-[2rem] py-5 pl-14 pr-16 focus:outline-none transition-all shadow-lg text-lg font-bold focus:border-emerald-400" 
               />
               {!isScanning && (
-                <button type="button" onClick={startScanner} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-slate-900 rounded-xl text-slate-400 hover:text-amber-400 transition-all">
+                <button type="button" onClick={startScanner} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-slate-900 rounded-xl text-slate-400 hover:text-emerald-400 transition-all">
                   <ScanLine className="w-5 h-5" />
                 </button>
               )}
 
-              {/* Product Results Dropdown */}
               {productSearchResults.length > 0 && (
                 <div className="absolute w-full mt-2 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl max-h-60 overflow-y-auto custom-scrollbar">
                   {productSearchResults.map(product => (
                      <button
                         key={product.id}
                         type="button"
-                        className="w-full text-left px-5 py-4 hover:bg-slate-700 border-b border-slate-700/50 flex flex-col transition-colors hover:border-l-4 hover:border-l-amber-400"
+                        className="w-full text-left px-5 py-4 hover:bg-slate-700 border-b border-slate-700/50 flex flex-col transition-colors hover:border-l-4 hover:border-l-emerald-400"
                         onClick={() => processAddToCart(product)}
                      >
                         <div className="flex justify-between items-start w-full">
                            <div>
                               <p className="text-white font-bold text-sm">{product.name}</p>
-                              <p className="text-[10px] text-slate-400 font-mono tracking-wider">SKU: {product.sku}</p>
+                              {product.genericName && <p className="text-xs text-slate-400 italic mb-1">{product.genericName}</p>}
+                              <p className="text-[10px] text-slate-500 font-mono tracking-wider">SKU: {product.sku}</p>
                            </div>
                            <div className="text-right">
-                              <p className="font-bold text-sm text-amber-400">৳{product.price}</p>
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Stock: {product.quantity}</p>
+                              <p className="font-bold text-sm text-emerald-400">৳{product.price}</p>
+                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-1">Stock: {product.quantity}</p>
                            </div>
                         </div>
-                        {/* Show generic name for pharmacy */}
-                        {(product as any).genericName && (
-                          <p className="text-[9px] text-emerald-400/80 font-bold uppercase tracking-widest mt-2 bg-emerald-400/10 px-2 py-1 rounded inline-block">
-                            {(product as any).genericName}
-                          </p>
-                        )}
                      </button>
                   ))}
                 </div>
               )}
             </div>
-
           </div>
 
           {isScanning && (
             <div className="mb-6 animate-in fade-in duration-300">
-              <div className="relative aspect-video bg-slate-800 rounded-3xl overflow-hidden border-2 border-amber-400/50">
+              <div className="relative aspect-video bg-slate-800 rounded-3xl overflow-hidden border-2 border-emerald-400/50">
                 <div id="sales-scanner-reader" className="w-full h-full"></div>
                 <div className="absolute top-0 left-0 w-full h-1 bg-white/30 animate-scan pointer-events-none"></div>
                 <button onClick={() => { setIsScanning(false); safeStopScanner(); }} className="absolute bottom-4 right-4 bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase">Cancel</button>
@@ -814,59 +1004,72 @@ const Sales: React.FC<SalesProps> = ({
             </div>
           )}
 
-          <div className="mt-8 pt-8 border-t border-slate-800 text-center opacity-30 select-none">
-             <Package className="w-16 h-16 mx-auto mb-4 text-slate-600" />
-             <p className="text-xs font-bold text-slate-400">Search products by name, Generic Name or SKU. Click an item from the dropdown to add it directly to the cart.</p>
+          <div className="mt-4 pt-6 border-t border-slate-800 text-center opacity-40 select-none">
+             <Pill className="w-10 h-10 mx-auto mb-2 text-slate-600" />
+             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Select physical medicines above</p>
           </div>
+
+          {/* SERVICING / DOCTOR FEE MODULE */}
+          <div className="mt-4">
+            <h3 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <Wrench className="w-4 h-4" /> Add Doctor Fee / Extra Charge
+            </h3>
+            <div className="space-y-3 bg-emerald-500/5 p-4 rounded-2xl border border-emerald-500/20">
+              <div className="space-y-1">
+                 <input type="text" value={serviceName} onChange={e => setServiceName(e.target.value)} placeholder="e.g., Doctor Fee, Nebulization..." className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:border-emerald-400 outline-none transition-colors" />
+              </div>
+              <div className="flex gap-3">
+                 <div className="flex-1 space-y-1">
+                   <input type="number" step="0.01" value={servicePrice} onChange={e => setServicePrice(e.target.value)} placeholder="Charge Amount ($)" className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:border-emerald-400 outline-none transition-colors" />
+                 </div>
+                 <div className="w-20 space-y-1">
+                   <input type="number" step="0.01" min="0.01" value={serviceQty} onChange={e => setServiceQty(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm text-center focus:border-emerald-400 outline-none transition-colors" title="Quantity" />
+                 </div>
+              </div>
+              <button type="button" onClick={handleAddService} className="w-full py-3 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-white transition-all shadow-lg">
+                + Add Charge to Bill
+              </button>
+            </div>
+          </div>
+          {/* END SERVICING MODULE */}
+
         </div>
       </div>
 
-      {/* =====================================
-          RIGHT COLUMN: CART & CHECKOUT
-      ===================================== */}
+      {/* RIGHT COLUMN: CART & CHECKOUT */}
       <div className="flex-1 flex flex-col bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-[2.5rem] shadow-2xl overflow-hidden">
         
-        {/* Cart Header */}
         <div className="p-6 border-b border-slate-800 flex items-center justify-between">
            <div>
              <h2 className="text-xl font-black text-white tracking-tight uppercase flex items-center gap-3">
-               <ShoppingCart className="text-amber-400" size={24} /> 
+               <ShoppingCart className="text-emerald-400" size={24} /> 
                Local Cart / Order
              </h2>
              <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">{invoiceId}</p>
            </div>
         </div>
 
-        {/* Cart Items Table */}
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-900/30">
            <table className="w-full text-left">
               <thead className="sticky top-0 bg-slate-900 z-10">
                 <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800">
-                  <th className="px-6 py-4">Medicine Details</th>
+                  <th className="px-6 py-4">Item Details</th>
+                  <th className="px-4 py-4 text-center">Qty</th>
                   <th className="px-4 py-4 text-center">Unit</th>
-                  <th className="px-4 py-4 text-center">Vol (Qty)</th>
-                  <th className="px-4 py-4 text-right">Price</th>
+                  <th className="px-4 py-4 text-right">Unit Price</th>
                   <th className="px-4 py-4 text-right">Total</th>
                   <th className="px-6 py-4 text-center"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {cart.map((cartItem) => (
+                {cart.map((cartItem) => {
+                    const isService = cartItem.product.id.startsWith('SERVICE_');
+                    return (
                     <tr key={cartItem.cartId} className="group hover:bg-slate-800/40 transition-all animate-in slide-in-from-right-4 duration-300">
                       <td className="px-6 py-4">
-                         <p className="font-bold text-white text-sm truncate max-w-[200px]">{cartItem.product.name}</p>
-                         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter italic">Base Stock: {cartItem.product.quantity}</p>
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                         <select 
-                           value={cartItem.saleUnit} 
-                           onChange={(e) => handleCartUnitChange(cartItem.cartId, e.target.value as any)}
-                           className="w-24 bg-slate-800 border border-slate-700 rounded-xl text-center font-black text-slate-300 text-[10px] uppercase focus:border-amber-400 outline-none p-2 shadow-inner appearance-none cursor-pointer"
-                         >
-                            <option value="PIECE">Piece</option>
-                            {(cartItem.product as any).piecesPerStrip && (cartItem.product as any).piecesPerStrip > 1 && <option value="STRIP">Strip</option>}
-                            {(cartItem.product as any).piecesPerBox && (cartItem.product as any).piecesPerBox > 1 && <option value="BOX">Box</option>}
-                         </select>
+                         <p className={`font-bold text-sm truncate max-w-[200px] ${isService ? 'text-blue-400' : 'text-white'}`}>{cartItem.product.name}</p>
+                         {!isService && <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter italic">Stock: {cartItem.product.quantity} Pcs</p>}
+                         {isService && <p className="text-[9px] text-blue-500/70 font-black uppercase tracking-widest italic mt-0.5">Extra Charge / Service</p>}
                       </td>
                       <td className="px-4 py-4 text-center">
                          <input 
@@ -876,8 +1079,23 @@ const Sales: React.FC<SalesProps> = ({
                            onWheel={(e) => (e.target as HTMLInputElement).blur()} 
                            onFocus={e => e.target.select()} 
                            onChange={(e) => handleCartQtyChange(cartItem.cartId, parseInt(e.target.value))} 
-                           className="w-16 bg-slate-800 border border-slate-700 rounded-xl text-center font-black text-amber-400 text-sm focus:border-amber-400 outline-none p-1.5 shadow-inner" 
+                           className={`w-16 bg-slate-800 border border-slate-700 rounded-xl text-center font-black text-sm outline-none p-1.5 shadow-inner ${isService ? 'text-blue-400 focus:border-blue-400' : 'text-emerald-400 focus:border-emerald-400'}`} 
                          />
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                         {isService ? (
+                           <span className="text-slate-500 font-bold text-xs">-</span>
+                         ) : (
+                           <select
+                             value={cartItem.saleUnit}
+                             onChange={(e) => handleCartUnitChange(cartItem.cartId, e.target.value as any)}
+                             className="bg-slate-800 border border-slate-700 rounded-xl text-white text-xs font-bold p-2 outline-none focus:border-emerald-400 cursor-pointer"
+                           >
+                             <option value="PIECE">Piece</option>
+                             <option value="STRIP">Strip</option>
+                             <option value="BOX">Box</option>
+                           </select>
+                         )}
                       </td>
                       <td className="px-4 py-4 text-right">
                          <input 
@@ -887,7 +1105,7 @@ const Sales: React.FC<SalesProps> = ({
                            onWheel={(e) => (e.target as HTMLInputElement).blur()} 
                            onFocus={e => e.target.select()} 
                            onChange={(e) => handleCartPriceChange(cartItem.cartId, parseFloat(e.target.value))} 
-                           className="w-20 bg-slate-800 border border-slate-700 rounded-xl text-right font-black text-emerald-400 text-sm focus:border-emerald-400 outline-none p-1.5 shadow-inner" 
+                           className="w-20 bg-slate-800 border border-slate-700 rounded-xl text-right font-black text-amber-400 text-sm focus:border-amber-400 outline-none p-1.5 shadow-inner" 
                          />
                       </td>
                       <td className="px-4 py-4 text-right font-black text-white">
@@ -904,11 +1122,11 @@ const Sales: React.FC<SalesProps> = ({
                          </button>
                       </td>
                     </tr>
-                ))}
+                )})}
                 {cart.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-6 py-20 text-center opacity-30 grayscale">
-                      <Pill className="w-12 h-12 mx-auto text-slate-600 mb-4" />
+                      <ShoppingCart className="w-12 h-12 mx-auto text-slate-600 mb-4" />
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Cart is empty. Search items to begin.</p>
                     </td>
                   </tr>
@@ -917,12 +1135,10 @@ const Sales: React.FC<SalesProps> = ({
            </table>
         </div>
         
-        {/* 🔴 CHECKOUT PANEL WITH SMART CUSTOMER SEARCH 🔴 */}
         <div className="p-6 bg-slate-950 border-t border-slate-800 grid grid-cols-1 md:grid-cols-12 gap-6">
            <div className="md:col-span-8 space-y-4">
               <div className="flex gap-4">
                  
-                 {/* 🔴 SMART CUSTOMER SEARCH FIELD 🔴 */}
                  <div className="flex-1 relative">
                    <label className="text-[10px] text-slate-500 uppercase tracking-widest block mb-1">Patient Profile</label>
                    <div className="relative">
@@ -937,7 +1153,7 @@ const Sales: React.FC<SalesProps> = ({
                         onFocus={() => setIsCustomerDropdownOpen(true)}
                         onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)}
                         placeholder="Search name or phone..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-amber-400"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-emerald-400"
                      />
                      
                      <AnimatePresence>
@@ -969,11 +1185,11 @@ const Sales: React.FC<SalesProps> = ({
                                className="w-full text-left px-4 py-3 hover:bg-slate-700 text-sm font-bold text-white transition-colors border-b border-slate-700/50 flex justify-between"
                              >
                                <span>{c.name}</span>
-                               <span className="text-amber-400 text-xs">{c.phone}</span>
+                               <span className="text-emerald-400 text-xs">{c.phone}</span>
                              </button>
                            ))}
                            {filteredCustomers.length === 0 && customerSearchTerm !== '' && (
-                             <div className="px-4 py-3 text-xs text-slate-500 italic">No customer found</div>
+                             <div className="px-4 py-3 text-xs text-slate-500 italic">No patient found</div>
                            )}
                          </motion.div>
                        )}
@@ -987,13 +1203,11 @@ const Sales: React.FC<SalesProps> = ({
                      type="text" 
                      value={prescriptionRef} 
                      onChange={e => setPrescriptionRef(e.target.value)} 
-                     placeholder="Dr. Ref / Rx Num"
-                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold text-sm outline-none focus:border-amber-400" 
+                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-emerald-400 placeholder:text-slate-600" 
+                     placeholder="Doctor or Ref..."
                    />
                  </div>
-              </div>
-              
-              <div className="flex gap-4">
+
                  <div className="w-24">
                    <label className="text-[10px] text-slate-500 uppercase tracking-widest block mb-1">Discount %</label>
                    <input 
@@ -1001,15 +1215,18 @@ const Sales: React.FC<SalesProps> = ({
                      value={discount} 
                      onFocus={e => e.target.select()}
                      onChange={e => setDiscount(parseFloat(e.target.value)||0)} 
-                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-rose-400 font-black text-sm outline-none focus:border-amber-400" 
+                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-rose-400 font-black text-sm outline-none focus:border-emerald-400" 
                    />
                  </div>
+              </div>
+              
+              <div className="flex gap-4">
                  <div className="flex-1">
                    <label className="text-[10px] text-slate-500 uppercase tracking-widest block mb-1">Payment Method</label>
                    <select 
                      value={paymentMethod} 
                      onChange={e => setPaymentMethod(e.target.value)} 
-                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-amber-400 uppercase"
+                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm font-bold outline-none focus:border-emerald-400 uppercase"
                    >
                      <option value="Cash">Cash</option>
                      <option value="Card">Card</option>
@@ -1026,7 +1243,7 @@ const Sales: React.FC<SalesProps> = ({
                      onFocus={e => e.target.select()}
                      onChange={e => setAmountPaid(e.target.value)} 
                      placeholder="0.00" 
-                     className={`w-full border rounded-xl px-4 py-3 font-black text-sm outline-none transition-all ${!customerId ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-500 cursor-not-allowed' : 'bg-slate-900 border-slate-700 text-amber-400 focus:border-amber-400 amber-glow'}`} 
+                     className={`w-full border rounded-xl px-4 py-3 font-black text-sm outline-none transition-all ${!customerId ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-500 cursor-not-allowed' : 'bg-slate-900 border-slate-700 text-emerald-400 focus:border-emerald-400'}`} 
                    />
                  </div>
               </div>
@@ -1045,7 +1262,7 @@ const Sales: React.FC<SalesProps> = ({
               )}
               <div className="flex justify-between text-white text-xl font-black mt-2 pt-2 border-t border-slate-800">
                 <span className="uppercase tracking-widest text-xs self-center text-slate-500">Net Total:</span> 
-                <span className="gold-gradient-text">${cartTotalAfterDiscount.toFixed(2)}</span>
+                <span className="text-emerald-400">${cartTotalAfterDiscount.toFixed(2)}</span>
               </div>
               {customerId && (
                 <div className="flex justify-between text-rose-400 text-sm border-t border-slate-800 pt-2">
